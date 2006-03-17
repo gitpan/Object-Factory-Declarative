@@ -7,7 +7,7 @@ use Carp;
 
 our @ISA = qw();
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 my @decl_keys = qw(constructor constructor_args method method_args package);
 
@@ -59,6 +59,98 @@ sub expand_credentials
     return (\&expand_scalar_arg, @res);
 }
 
+sub generate_method
+{
+    my ($class, $name, $cons, $c_args, $init, $i_args) = @_;
+    my $package = ref $class || $class;
+    my $fullname = $package . '::' . $name;
+    my ($cons_expand_func, @c_args) = expand_credentials($c_args);
+    my ($init_expand_func, @i_args) = expand_credentials($i_args);
+    no strict 'refs';
+    # We have several similar cases...
+    # Case 1a & 1b - no init method
+    unless($init)
+    {
+        # 1a - with constructor args
+        if(@c_args)
+        {
+            *$fullname = sub
+            {
+                my ($obj) = @_;
+                $obj->$cons(&{$cons_expand_func}($obj, $name, @c_args));
+            } ;
+        }
+        # 2a - without constructor args
+        else
+        {
+            *$fullname = sub
+            {
+                my ($obj) = @_;
+                $obj->$cons;
+            } ;
+        }
+        return;
+    }
+    # Case 2a & 2b - init method, no init args
+    unless(@i_args)
+    {
+        # 2a - with constructor args
+        if(@c_args)
+        {
+            *$fullname = sub
+            {
+                my ($obj, @args) = @_;
+                my $rv = $obj->$cons(&{$cons_expand_func}($obj,
+                                    $name, @c_args));
+                $rv->$init;
+                # expand_hash_arg will convert to expand_array_arg...
+                $rv->$init(expand_hash_arg($obj, $name, @args)) if @args;
+                $rv;
+            } ;
+        }
+        # 2b - without constructor args
+        else
+        {
+            *$fullname = sub
+            {
+                my ($obj, @args) = @_;
+                my $rv = $obj->$cons;
+                $rv->$init;
+                # expand_hash_arg will convert to expand_array_arg...
+                $rv->$init(expand_hash_arg($rv, $name, @args)) if @args;
+                $rv;
+            } ;
+        }
+        return;
+    }
+    # Case 3a & 3b - init with args
+    # 3a - with constructor args
+    if(@c_args)
+    {
+        *$fullname = sub
+        {
+            my ($obj, @args) = @_;
+            my $rv = $obj->$cons(&{$cons_expand_func}($obj,
+                $name, @c_args));
+            $rv->$init(&{$init_expand_func}($obj, $name, @i_args));
+            $rv->$init(&{$init_expand_func}($obj, $name, @args)) if @args;
+            $rv;
+        } ;
+    }
+    # 3b - without constructor args
+    else
+    {
+        *$fullname = sub
+        {
+            my ($obj, @args) = @_;
+            my $rv = $obj->$cons;
+            $rv->$init(&{$init_expand_func}($obj, $name, @i_args));
+            $rv->$init(&{$init_expand_func}($obj, $name, @args)) if @args;
+            $rv;
+        } ;
+    }
+}
+
 sub import
 {
     my ($package, @args) = @_;
@@ -71,10 +163,11 @@ sub import
     while(@args)
     {
         my ($name, $ref) = splice @args, 0, 2;
-        my %h = %$ref;
+        my %h;
         if('--defaults' eq $name)
         {
             %defaults = ( package => $callpkg );
+            %h = %$ref;
             foreach my $k (grep { exists $h{$_}; } @decl_keys)
             {
                 delete $defaults{$k};
@@ -84,102 +177,21 @@ sub import
             carp "Unexpected declaration key(s) ", join(',', keys %h) if %h;
             next;
         }
+        if('--export-to' eq $name)
+        {
+            no strict 'refs';
+            *$ref = \&generate_method;
+            next;
+        }
+        %h = %$ref;
         my %p;
         $p{$_} = delete $h{$_} || $defaults{$_} foreach @decl_keys;
         carp "Unexpected declaration key(s) ", join(',', keys %h) if %h;
-        my $fullname = $p{package} . '::' . $name;
-        my $cons = $p{constructor};
-        my $init = $p{method};
-        my $c_args = $p{constructor_args};
-        my $i_args = $p{method_args};
         carp "Can't have initialization args without an initialization method"
-            if $i_args and not $init;
-        carp "Missing constructor" and next unless $cons;
-        my ($cons_expand_func, @c_args) = expand_credentials($c_args);
-        my ($init_expand_func, @i_args) = expand_credentials($i_args);
-        no strict 'refs';
-        # We have several similar cases...
-        # Case 1a & 1b - no init method
-        unless($init)
-        {
-            # 1a - with constructor args
-            if(@c_args)
-            {
-                *$fullname = sub
-                {
-                    my ($obj) = @_;
-                    $obj->$cons(&{$cons_expand_func}($obj, $name, @c_args));
-                } ;
-            }
-            # 2a - without constructor args
-            else
-            {
-                *$fullname = sub
-                {
-                    my ($obj) = @_;
-                    $obj->$cons;
-                } ;
-            }
-            next;
-        }
-        # Case 2a & 2b - init method, no init args
-        unless(@i_args)
-        {
-            # 2a - with constructor args
-            if(@c_args)
-            {
-                *$fullname = sub
-                {
-                    my ($obj, @args) = @_;
-                    my $rv = $obj->$cons(&{$cons_expand_func}($obj,
-                                        $name, @c_args));
-                    $rv->$init;
-                    # expand_hash_arg will convert to expand_array_arg...
-                    $rv->$init(expand_hash_arg($rv, $name, @args)) if @args;
-                    $rv;
-                } ;
-            }
-            # 2b - without constructor args
-            else
-            {
-                *$fullname = sub
-                {
-                    my ($obj, @args) = @_;
-                    my $rv = $obj->$cons;
-                    $rv->$init;
-                    # expand_hash_arg will convert to expand_array_arg...
-                    $rv->$init(expand_hash_arg($rv, $name, @args)) if @args;
-                    $rv;
-                } ;
-            }
-            next;
-        }
-        # Case 3a & 3b - init with args
-        # 3a - with constructor args
-        if(@c_args)
-        {
-            *$fullname = sub
-            {
-                my ($obj, @args) = @_;
-                my $rv = $obj->$cons(&{$cons_expand_func}($obj,
-                    $name, @c_args));
-                $rv->$init(&{$init_expand_func}($rv, $name, @i_args));
-                $rv->$init(&{$init_expand_func}($rv, $name, @args)) if @args;
-                $rv;
-            } ;
-        }
-        # 3b - without constructor args
-        else
-        {
-            *$fullname = sub
-            {
-                my ($obj, @args) = @_;
-                my $rv = $obj->$cons;
-                $rv->$init(&{$init_expand_func}($rv, $name, @i_args));
-                $rv->$init(&{$init_expand_func}($rv, $name, @args)) if @args;
-                $rv;
-            } ;
-        }
+            if $p{method_args} and not $p{method};
+        carp "Missing constructor" and next unless $p{constructor};
+        generate_method($p{package}, $name, @p{qw(constructor constructor_args
+            method method_args)});
     }
 }
 
@@ -207,7 +219,9 @@ Object::Factory::Declarative - Create object factory methods using declarative s
             title => 'Main template',
             content => 'generate_content',
         },
-    }
+    },
+    '--export-to' => __PACKAGE__ . '::new_template_factory',
+
   ) ;
 
   # ...
@@ -232,10 +246,14 @@ step before the created object gets returned.
 The module is used with a list of method name - parameter hash ref pairs.
 The method name becomes the name of the declared method.  If the special
 method name C<--defaults> is given, further methods can be declared
-assuming the values set in the C<--defaults> section.  The parameters to
-the C<use> statement are processed as a list, not a hash.  This means
-you can have more than one C<--default> section, with each one overriding
-the previous one.
+assuming the values set in the C<--defaults> section.  The special
+method name C<--export-to> is used to declare an alias for the function
+that creates factory methods.
+
+The parameters to the C<use> statement are processed as a list, not a
+hash.  This means you can have more than one C<--default> section, with
+each one overriding the previous one.  You can also export more than
+one alias for the factory creation function.
 
 The valid keys (and their meanings) for the parameter hash refs are:
 
@@ -278,17 +296,10 @@ the declared method are also expanded before being passed to the
 initialization method.
 
 Arguments are expanded when the object is created, not when the declared
-method is created.
-
-For the constructor arguments, expansion takes place in the context of
-the class or object used to start the process.  For the example in the
-synopsis, this would be the value of C<$self> at the time the
+method is created.  Argument expansion takes place in the context of the
+class or object where the declared method is called.  For the example in
+the synopsis, this would be the value of C<$self> at the time the
 main_template() method were called.
-
-For initialization and declared method arguments, expansion takes place
-in the context of the created object.  For the example in the synopsis,
-this would be whatever object were returned from the call to load_tmpl()
-in the context of C<$self>.
 
 For constructor and initialization methods, argument expansion is
 dependent on the type of the argument.  For scalar arguments, an attempt
@@ -357,6 +368,22 @@ be expanded as a hash.
 B<Object::Factory::Declarative> expects the calling class (or one of its
 superclasses) to provide the constructor and initialization methods, as
 well as any methods used in argument expansion.
+
+=head1 FACTORY CREATION FUNCTION ALIASES
+
+If you create an alias for the factory creation function, it can either
+be called as a function (with an explicit package as the first argument)
+or as a method.  For a method call, the syntax is:
+
+  $self->new_factory($name, $cons, $cons_arg, $init, $init_arg);
+
+The arguments correspond to the name of the declared method, the name of 
+the constructor method, the argument to the constructor (as a scalar or
+reference, and subject to argument expansion), the initialization
+method, and the argument to the initialization method, (again, as a
+scalar or reference, and subject to argument expansion).
+
+You can also call it as a function by providing an explicit package name.
 
 =head1 NOTES
 

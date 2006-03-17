@@ -8,3 +8,8 @@ Revision history for Perl extension Object::Factory::Declarative.
 0.04  Wed Mar 15 21:11:20 2006
     - Moved to Object::Factory::Declarative namespace
     - Added argument expansion to arguments to factory method.
+
+0.05  Thu Mar 16 19:44:21 2006
+    - Added an external interface.
+    - Changed argument expansion context to be the class or object calling
+      the declared object in all cases.

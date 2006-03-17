@@ -1,6 +1,6 @@
 ---
 name: Object-Factory-Declarative
-version: 0.04
+version: 0.05
 author:
   - Jim Schneider <perl@jrcsdevelopment.com>
 abstract: Create object factory methods using declarative syntax
@@ -8,5 +8,5 @@ license: perl
 provides:
   Object::Factory::Declarative:
     file: lib/Object/Factory/Declarative.pm
-    version: 0.04
-generated_by: Module::Build version 0.2612
+    version: 0.05
+generated_by: Module::Build version 0.2611

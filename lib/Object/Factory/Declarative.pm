@@ -7,7 +7,7 @@ use Carp;
 
 our @ISA = qw();
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
 my @decl_keys = qw(constructor constructor_args method method_args package);
 
@@ -18,11 +18,11 @@ sub expand_scalar_arg
     if(@_>3)
     {
         my $opt = $_[3];
-        eval { @res = $obj->$arg($opt, $name); };
+        eval { no warnings; @res = $obj->$arg($opt, $name); };
     }
     else
     {
-        eval { @res = $obj->$arg($name); };
+        eval { no warnings; @res = $obj->$arg($name); };
     }
     wantarray?@res:pop @res;
 }
@@ -52,9 +52,9 @@ sub expand_credentials
     return sub {} unless defined $argf;
     return (\&expand_scalar_arg, $argf) unless ref $argf;
     my @res = ($argf);
-    eval { @res = @$argf; };
+    eval { no warnings; @res = @$argf; };
     return (\&expand_array_arg, @res) unless $@;
-    eval { @res = %$argf; };
+    eval { no warnings; @res = %$argf; };
     return (\&expand_hash_arg, @res) unless $@;
     return (\&expand_scalar_arg, @res);
 }
